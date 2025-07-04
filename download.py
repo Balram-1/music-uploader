@@ -7,12 +7,12 @@ from datetime import datetime
 app = Flask(__name__)
 
 UPLOAD_DIR = "/tmp/music_uploads"
-if not os.path.exists(UPLOAD_DIR):
-    os.makedirs(UPLOAD_DIR)
+DRIVE_DIR = "gdrive:/Navidrome"
+
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 def sanitize_filename(title):
-    # Clean and shorten the filename
-    title = re.sub(r'[\/:*?"<>|]', '', title)
+    title = re.sub(r'[\\/:*?"<>|]', '', title)
     return title[:100].strip()
 
 def download_song(link):
@@ -25,35 +25,38 @@ def download_song(link):
         "--audio-format", "mp3",
         "--embed-thumbnail",
         "--add-metadata",
+        "--no-playlist",
         "-o", output_template,
         link
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        return None, result.stderr
+        return None, result.stderr.strip()
 
-    # Find the mp3 file downloaded
-    files = [f for f in os.listdir(UPLOAD_DIR) if f.endswith(".mp3")]
-    if not files:
+    mp3_files = [f for f in os.listdir(UPLOAD_DIR) if f.endswith(".mp3")]
+    if not mp3_files:
         return None, "No MP3 downloaded"
 
-    latest_file = max(files, key=lambda f: os.path.getctime(os.path.join(UPLOAD_DIR, f)))
+    latest_file = max(mp3_files, key=lambda f: os.path.getctime(os.path.join(UPLOAD_DIR, f)))
     return os.path.join(UPLOAD_DIR, latest_file), None
 
 def upload_to_drive(local_file):
     filename = os.path.basename(local_file)
-    drive_path = f"gdrive:/Navidrome/{filename}"
-    cmd = ["rclone", "copy", local_file, drive_path]
+    drive_path = f"{DRIVE_DIR}/{filename}"
+
+    cmd = ["rclone", "copy", local_file, drive_path, "--progress"]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        return False, result.stderr
+        return False, result.stderr.strip()
+
     return True, None
 
 @app.route("/download", methods=["POST"])
 def handle_download():
-    data = request.json
+    data = request.get_json()
     link = data.get("link")
+
     if not link:
         return jsonify({"error": "No link provided"}), 400
 
@@ -65,7 +68,10 @@ def handle_download():
     if not success:
         return jsonify({"error": upload_err}), 500
 
-    return jsonify({"message": "Song downloaded and uploaded successfully", "file": os.path.basename(mp3_path)})
+    return jsonify({
+        "message": "Song downloaded and uploaded successfully",
+        "file": os.path.basename(mp3_path)
+    })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)

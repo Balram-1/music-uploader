@@ -116,7 +116,7 @@
     async function submitLink() {
         const link = document.getElementById('linkInput').value;
         const consoleBox = document.getElementById('consoleOutput');
-        consoleBox.textContent = "⏳ Processing...";
+        consoleBox.textContent = "⏳ Processing... This may take a minute for playlists.";
 
         if (!link) {
             consoleBox.textContent = "⚠️ Please enter a valid link.";
@@ -127,45 +127,24 @@
             const response = await fetch('/api/download', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: link }) // Changed from "link" to "url"
+                body: JSON.stringify({ url: link })
             });
 
             const result = await response.json();
             if (result.error) {
                 consoleBox.textContent = "❌ Error: " + result.error;
+            } else if (result.file && Array.isArray(result.file)) {
+                consoleBox.innerHTML = "✅ Uploaded:<br><ul>" +
+                    result.file.map(f => `<li>${f}</li>`).join('') + "</ul>";
             } else {
                 consoleBox.textContent = "✅ Uploaded: " + result.file;
-                addToPlaylist(result.file);
             }
         } catch (err) {
             consoleBox.textContent = "❌ Network error or server not responding.";
         }
     }
-
-    function addToPlaylist(songName) {
-        const ul = document.getElementById('playlist');
-        const li = document.createElement('li');
-        li.textContent = songName;
-        li.onclick = () => playSong(songName);
-        ul.prepend(li);
-    }
-
-    function playSong(songName) {
-        const audio = document.getElementById('audioPlayer');
-        const source = document.getElementById('audioSource');
-        source.src = `https://drive.example.com/Navidrome/${encodeURIComponent(songName)}`;
-        audio.load();
-        audio.play();
-    }
-
-    function searchSongs() {
-        const query = document.getElementById('searchInput').value.toLowerCase();
-        const items = document.querySelectorAll('#playlist li');
-        items.forEach(item => {
-            item.style.display = item.textContent.toLowerCase().includes(query) ? 'block' : 'none';
-        });
-    }
 </script>
+
 
 </body>
 </html>

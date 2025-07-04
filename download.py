@@ -1,21 +1,19 @@
-from flask import Flask, request, jsonify
 import subprocess
 import os
 import re
 from datetime import datetime
 
-app = Flask(__name__)
-
+# Directory to temporarily save downloaded songs
 UPLOAD_DIR = "/tmp/music_uploads"
-DRIVE_DIR = "gdrive:/Navidrome"
-
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 def sanitize_filename(title):
-    title = re.sub(r'[\\/:*?"<>|]', '', title)
+    """Remove problematic characters and limit filename length."""
+    title = re.sub(r'[\/:*?"<>|]', '', title)
     return title[:100].strip()
 
 def download_song(link):
+    """Download a song from YouTube/Spotify using yt-dlp and return the file path."""
     now = datetime.now().strftime("%Y%m%d%H%M%S")
     output_template = os.path.join(UPLOAD_DIR, f"%(title).100s_%(id)s_{now}.%(ext)s")
 
@@ -25,53 +23,42 @@ def download_song(link):
         "--audio-format", "mp3",
         "--embed-thumbnail",
         "--add-metadata",
-        "--no-playlist",
         "-o", output_template,
         link
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        return None, result.stderr.strip()
+        return None, f"Download error:\n{result.stderr}"
 
-    mp3_files = [f for f in os.listdir(UPLOAD_DIR) if f.endswith(".mp3")]
-    if not mp3_files:
-        return None, "No MP3 downloaded"
+    # Find the newest mp3 file in the upload dir
+    files = [f for f in os.listdir(UPLOAD_DIR) if f.endswith(".mp3")]
+    if not files:
+        return None, "No MP3 file found after download"
 
-    latest_file = max(mp3_files, key=lambda f: os.path.getctime(os.path.join(UPLOAD_DIR, f)))
+    latest_file = max(files, key=lambda f: os.path.getctime(os.path.join(UPLOAD_DIR, f)))
     return os.path.join(UPLOAD_DIR, latest_file), None
 
 def upload_to_drive(local_file):
+    """Upload the given MP3 file to Google Drive using rclone."""
     filename = os.path.basename(local_file)
-    drive_path = f"{DRIVE_DIR}/{filename}"
+    drive_path = f"gdrive:/Navidrome/{filename}"
 
-    cmd = ["rclone", "copy", local_file, drive_path, "--progress"]
+    cmd = ["rclone", "copy", local_file, drive_path]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        return False, result.stderr.strip()
+        return False, f"Upload error:\n{result.stderr}"
 
     return True, None
 
-@app.route("/download", methods=["POST"])
-def handle_download():
-    data = request.get_json()
-    link = data.get("link")
-
-    if not link:
-        return jsonify({"error": "No link provided"}), 400
-
+def download_and_upload(link):
+    """Combined function to download a song and upload to drive."""
     mp3_path, error = download_song(link)
     if error:
-        return jsonify({"error": error}), 500
+        return None, error
 
-    success, upload_err = upload_to_drive(mp3_path)
+    success, upload_error = upload_to_drive(mp3_path)
     if not success:
-        return jsonify({"error": upload_err}), 500
+        return None, upload_error
 
-    return jsonify({
-        "message": "Song downloaded and uploaded successfully",
-        "file": os.path.basename(mp3_path)
-    })
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    return os.path.basename(mp3_path), None

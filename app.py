@@ -5,37 +5,37 @@ import os
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = '/tmp/music_uploads'
 
-# Web Interface Route
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
         url = request.form.get("url")
         if not url:
             return render_template("index.html", error="⚠️ Please enter a YouTube or Spotify link.")
-
         try:
-            filename = download_and_upload(url)
+            filename, error = download_and_upload(url)
+            if error:
+                return render_template("index.html", error=f"❌ {error}")
             return render_template("index.html", success=f"✅ Downloaded and saved as {filename}")
         except Exception as e:
-            return render_template("index.html", error=f"❌ Error: {str(e)}")
-
+            return render_template("index.html", error=f"❌ Exception: {str(e)}")
     return render_template("index.html")
 
-# API Route for bots or clients
 @app.route("/api/download", methods=["POST"])
 def api_download():
-    data = request.get_json()
-    url = data.get("url")
-    if not url:
-        return jsonify({"error": "No URL provided"}), 400
-
     try:
-        filename = download_and_upload(url)
-        return jsonify({"success": True, "file": filename})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        data = request.get_json(force=True)
+        url = data.get("link") or data.get("url")
+        if not url:
+            return jsonify({"error": "No URL provided"}), 400
 
-# Run the app
+        filename, error = download_and_upload(url)
+        if error:
+            return jsonify({"error": error}), 500
+        return jsonify({"success": True, "file": filename})
+
+    except Exception as e:
+        return jsonify({"error": f"Internal error: {str(e)}"}), 500
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)

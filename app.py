@@ -1,41 +1,58 @@
-from flask import Flask, request, jsonify, render_template
-from download import download_and_upload
+from flask import Flask, request, jsonify
 import os
+import subprocess
+import uuid
+import shutil
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = '/tmp/music_uploads'
 
-@app.route("/", methods=["GET", "POST"])
-def index():
-    if request.method == "POST":
-        url = request.form.get("url")
-        if not url:
-            return render_template("index.html", error="⚠️ Please enter a YouTube or Spotify link.")
-        try:
-            filename, error = download_and_upload(url)
-            if error:
-                return render_template("index.html", error=f"❌ {error}")
-            return render_template("index.html", success=f"✅ Downloaded and saved as {filename}")
-        except Exception as e:
-            return render_template("index.html", error=f"❌ Exception: {str(e)}")
-    return render_template("index.html")
+MUSIC_TEMP_DIR = "/tmp/music_download"
+GDRIVE_REMOTE = "gdrive:music"  # Your rclone remote:path
 
-@app.route("/api/download", methods=["POST"])
-def api_download():
+os.makedirs(MUSIC_TEMP_DIR, exist_ok=True)
+
+def run_command(cmd):
     try:
-        data = request.get_json(force=True)
-        url = data.get("link") or data.get("url")
-        if not url:
-            return jsonify({"error": "No URL provided"}), 400
-
-        filename, error = download_and_upload(url)
-        if error:
-            return jsonify({"error": error}), 500
-        return jsonify({"success": True, "file": filename})
-
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=600)
+        return result.returncode, result.stdout + result.stderr
     except Exception as e:
-        return jsonify({"error": f"Internal error: {str(e)}"}), 500
+        return 1, str(e)
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+@app.route('/api/download', methods=['POST'])
+def download():
+    data = request.get_json()
+    url = data.get('url')
+    if not url:
+        return jsonify({"error": "No URL provided"}), 400
+
+    # Unique subfolder for this download
+    job_id = str(uuid.uuid4())
+    download_dir = os.path.join(MUSIC_TEMP_DIR, job_id)
+    os.makedirs(download_dir, exist_ok=True)
+
+    # Decide which tool to use
+    if "spotify" in url.lower():
+        # spotdl
+        cmd = f"spotdl download \"{url}\" --output \"{download_dir}/%(artist)s - %(title)s.%(ext)s\""
+    else:
+        # yt-dlp (audio extraction)
+        cmd = f"yt-dlp -x --audio-format mp3 --embed-thumbnail --embed-metadata -o \"{download_dir}/%(title)s.%(ext)s\" \"{url}\""
+
+    code, output = run_command(cmd)
+    if code != 0:
+        shutil.rmtree(download_dir, ignore_errors=True)
+        return jsonify({"error": f"Download failed: {output}"}), 500
+
+    # rclone copy to Google Drive
+    code, rclone_output = run_command(f"rclone copy \"{download_dir}\" \"{GDRIVE_REMOTE}\" --fast-list")
+    if code != 0:
+        shutil.rmtree(download_dir, ignore_errors=True)
+        return jsonify({"error": f"Upload failed: {rclone_output}"}), 500
+
+    # List uploaded files
+    files = [f for f in os.listdir(download_dir) if not f.startswith(".")]
+    shutil.rmtree(download_dir, ignore_errors=True)
+    return jsonify({"file": files})
+
+if __name__ == '__main__':
+    app.run(host="0.0.0.0", port=5000)

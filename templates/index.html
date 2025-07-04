@@ -29,53 +29,22 @@
             font-weight: 600;
             color: #00ff99;
         }
-        .search {
+        .actions {
             display: flex;
-            gap: 0.5rem;
+            gap: 1rem;
         }
-        .search input {
-            padding: 0.5rem 1rem;
+        .actions button {
+            padding: 0.6rem 1.2rem;
             border: none;
             border-radius: 6px;
-            background: #1e1e1e;
-            color: #fff;
-            width: 300px;
-        }
-        .search button {
-            padding: 0.5rem 1rem;
             background: #00ff99;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
             color: #000;
             font-weight: 600;
-        }
-        .playlist, .player {
-            background: #1a1a1a;
-            border-radius: 12px;
-            padding: 1rem;
-            margin-top: 1rem;
-            box-shadow: 0 0 10px rgba(0, 255, 153, 0.3);
-            transition: all 0.3s ease;
-        }
-        .playlist:hover, .player:hover {
-            transform: scale(1.02);
-        }
-        .playlist h2, .player h2 {
-            margin-bottom: 1rem;
-            color: #00ffcc;
-        }
-        .playlist ul {
-            list-style: none;
-        }
-        .playlist li {
-            padding: 0.5rem;
-            border-bottom: 1px solid #333;
             cursor: pointer;
-            transition: 0.2s;
+            transition: background 0.3s;
         }
-        .playlist li:hover {
-            background-color: #2a2a2a;
+        .actions button:hover {
+            background: #00cc7a;
         }
         .upload-section {
             margin-top: 2rem;
@@ -103,6 +72,17 @@
             border-radius: 8px;
             cursor: pointer;
         }
+        .console-output {
+            background: #000;
+            color: #00ff99;
+            padding: 1rem;
+            margin-top: 1rem;
+            font-family: monospace;
+            border-radius: 8px;
+            height: 150px;
+            overflow-y: auto;
+            box-shadow: inset 0 0 10px #00ff99;
+        }
         footer {
             margin-top: 3rem;
             text-align: center;
@@ -113,31 +93,19 @@
 <body>
     <header>
         <h1>LoopDev Music</h1>
-        <div class="search">
-            <input type="text" id="searchInput" placeholder="Search songs...">
-            <button onclick="searchSongs()">Search</button>
+        <div class="actions">
+            <button onclick="window.location.href='https://music.loopdev.xyz'">🎧 Listen Music</button>
+            <button onclick="document.getElementById('uploadSection').scrollIntoView({behavior: 'smooth'})">⬆️ Upload Music</button>
         </div>
     </header>
 
-    <section class="player">
-        <h2>Now Playing</h2>
-        <audio id="audioPlayer" controls style="width: 100%;">
-            <source id="audioSource" src="" type="audio/mp3">
-            Your browser does not support the audio element.
-        </audio>
-    </section>
-
-    <section class="playlist">
-        <h2>Playlist</h2>
-        <ul id="playlist">
-            <!-- Songs will be dynamically loaded here -->
-        </ul>
-    </section>
-
-    <section class="upload-section">
+    <section class="upload-section" id="uploadSection">
         <h2>Download from YouTube/Spotify</h2>
-        <input type="text" id="linkInput" placeholder="Paste YouTube or Spotify link here">
+        <input type="text" id="linkInput" placeholder="Paste YouTube/Spotify link or playlist URL">
         <button onclick="submitLink()">Download & Upload</button>
+        <div class="console-output" id="consoleOutput">
+            Awaiting input...
+        </div>
     </section>
 
     <footer>
@@ -147,45 +115,32 @@
     <script>
         async function submitLink() {
             const link = document.getElementById('linkInput').value;
-            if (!link) return alert("Please paste a link!");
+            const output = document.getElementById('consoleOutput');
 
-            const response = await fetch('/download', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ link })
-            });
-
-            const result = await response.json();
-            if (result.error) {
-                alert("Error: " + result.error);
-            } else {
-                alert("Downloaded and uploaded: " + result.file);
-                addToPlaylist(result.file);
+            if (!link) {
+                output.textContent = "[!] Please paste a valid link.";
+                return;
             }
-        }
 
-        function addToPlaylist(songName) {
-            const ul = document.getElementById('playlist');
-            const li = document.createElement('li');
-            li.textContent = songName;
-            li.onclick = () => playSong(songName);
-            ul.prepend(li);
-        }
+            output.textContent = "[+] Sending link to server...";
 
-        function playSong(songName) {
-            const audio = document.getElementById('audioPlayer');
-            const source = document.getElementById('audioSource');
-            source.src = `https://drive.example.com/Navidrome/${encodeURIComponent(songName)}`; // change if needed
-            audio.load();
-            audio.play();
-        }
+            try {
+                const response = await fetch('/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ link })
+                });
 
-        function searchSongs() {
-            const query = document.getElementById('searchInput').value.toLowerCase();
-            const items = document.querySelectorAll('#playlist li');
-            items.forEach(item => {
-                item.style.display = item.textContent.toLowerCase().includes(query) ? 'block' : 'none';
-            });
+                const result = await response.json();
+
+                if (result.error) {
+                    output.textContent = `[x] Error: ${result.error}`;
+                } else {
+                    output.textContent = `[✓] Downloaded and uploaded: ${result.file}`;
+                }
+            } catch (err) {
+                output.textContent = `[x] Network Error: ${err.message}`;
+            }
         }
     </script>
 </body>

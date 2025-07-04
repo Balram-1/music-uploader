@@ -1,85 +1,71 @@
 import os
-import re
-import sys
 import subprocess
+import sys
+import re
 from datetime import datetime
 
-# Configurations
-YT_DLP_PATH = "yt-dlp"  # Assumes yt-dlp is in PATH
-FFMPEG_PATH = "ffmpeg"  # Assumes ffmpeg is in PATH
-UPLOAD_DIR = "/tmp/music_uploads"
-RCLONE_REMOTE = "gdrive:/Navidrome"
+# Config
+YT_DLP_PATH = "yt-dlp"  # Ensure yt-dlp is in PATH or full path
+FFMPEG_PATH = "ffmpeg"  # Ensure ffmpeg is in PATH or full path
+RCLONE_REMOTE = "gdrive:music"
+TEMP_DIR = "/tmp/music_uploads"
+os.makedirs(TEMP_DIR, exist_ok=True)
 
-# Create upload directory if not exists
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+def sanitize_filename(title):
+    """Clean filename from unwanted characters."""
+    return re.sub(r'[\\/:"*?<>|]+', '', title)[:100].strip()
 
-def sanitize_filename(name):
-    name = re.sub(r'[\\/:*?"<>|]', '', name)
-    return name.strip()[:100]
-
-def is_spotify_link(link):
-    return "open.spotify.com" in link
-
-def download_song(link):
-    now = datetime.now().strftime("%Y%m%d%H%M%S")
-    output_template = os.path.join(UPLOAD_DIR, f"%(title).100s_%(id)s_{now}.%(ext)s")
+def download_audio(link):
+    """Download highest quality mp3 with thumbnail and metadata."""
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    outtmpl = os.path.join(TEMP_DIR, f"%(title).100s_%(id)s_{timestamp}.%(ext)s")
 
     cmd = [
         YT_DLP_PATH,
         "--extract-audio",
         "--audio-format", "mp3",
-        "--audio-quality", "0",  # Best quality
+        "--audio-quality", "0",  # best
         "--embed-thumbnail",
         "--add-metadata",
         "--ffmpeg-location", FFMPEG_PATH,
-        "-o", output_template,
+        "-o", outtmpl,
         link
     ]
 
-    print("[+] Downloading...")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        return None, f"Download failed:\n{result.stderr}"
+        raise RuntimeError(f"[yt-dlp] Error:\n{result.stderr}")
 
-    # Locate the most recent MP3 file
-    mp3_files = [f for f in os.listdir(UPLOAD_DIR) if f.endswith(".mp3")]
-    if not mp3_files:
-        return None, "No MP3 file found after download."
+    # Get latest downloaded mp3
+    mp3s = [f for f in os.listdir(TEMP_DIR) if f.endswith(".mp3")]
+    if not mp3s:
+        raise FileNotFoundError("No MP3 file found in output.")
 
-    latest_file = max(mp3_files, key=lambda f: os.path.getctime(os.path.join(UPLOAD_DIR, f)))
-    return os.path.join(UPLOAD_DIR, latest_file), None
+    latest = max(mp3s, key=lambda f: os.path.getctime(os.path.join(TEMP_DIR, f)))
+    return os.path.join(TEMP_DIR, latest)
 
-def upload_to_drive(file_path):
-    cmd = ["rclone", "copy", file_path, RCLONE_REMOTE]
-    print("[+] Uploading to Google Drive...")
+def upload_to_drive(filepath):
+    """Upload the mp3 file to Google Drive using rclone."""
+    cmd = ["rclone", "copy", filepath, RCLONE_REMOTE]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        return False, f"Upload failed:\n{result.stderr}"
-    return True, None
-
-def convert_spotify_to_youtube(spotify_link):
-    # Use yt-dlp's internal support for Spotify (via YouTube search)
-    return spotify_link
+        raise RuntimeError(f"[rclone] Upload failed:\n{result.stderr}")
+    return os.path.basename(filepath)
 
 def download_and_upload(link):
-    if is_spotify_link(link):
-        print("[i] Spotify link detected. Will attempt best matching download.")
-        link = convert_spotify_to_youtube(link)
-
-    file_path, error = download_song(link)
-    if error:
-        print("[x]", error)
-        return
-
-    success, upload_error = upload_to_drive(file_path)
-    if not success:
-        print("[x]", upload_error)
-    else:
-        print(f"[✓] Uploaded: {os.path.basename(file_path)}")
+    """Wrapper function: download -> upload -> return filename."""
+    local_path = download_audio(link)
+    filename = upload_to_drive(local_path)
+    return filename
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python uploader.py <youtube_or_spotify_link>")
+        print("Usage: python uploader.py <YouTube_or_Spotify_link>")
         sys.exit(1)
 
-    download_and_upload(sys.argv[1])
+    try:
+        final_file = download_and_upload(sys.argv[1])
+        print(f"[✓] Done! Uploaded as: {final_file}")
+    except Exception as e:
+        print(f"[✗] Error: {e}")
+        sys.exit(1)
